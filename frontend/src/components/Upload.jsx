@@ -13,10 +13,10 @@ export default function Upload() {
         const formData = new FormData();
         formData.append('file', file);
         try {
-            const res = await axios.post('http://localhost:8000/upload-sales', formData);
+            const res = await axios.post('/upload-sales', formData);
             setMessage(res.data.message);
             // Automatically trigger forecast generation
-            await axios.get('http://localhost:8000/forecast');
+            await axios.get('/forecast');
             setMessage(res.data.message + " - Forecast generated successfully!");
         } catch (err) {
             setMessage('Upload failed. ' + err.message);

@@ -8,7 +8,7 @@ export default function Dashboard() {
 
     useEffect(() => {
         // API logic will execute provided it's running
-        axios.get('http://localhost:8000/inventory').then(res => setInventory(res.data)).catch(console.error);
+        axios.get('/inventory').then(res => setInventory(res.data)).catch(console.error);
     }, []);
 
     const totalSKUs = inventory.length;
