@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import jwt
 from datetime import datetime, timedelta
+from passlib.context import CryptContext
 from pydantic_settings import BaseSettings
-from google.oauth2 import id_token
-from google.auth.transport import requests
 from sqlalchemy.orm import Session
 import models
 from database import get_db
@@ -14,12 +13,18 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-super-secret-key-change-in-prod")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
-    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "placeholder-client-id.apps.googleusercontent.com")
 
 settings = Settings()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 router = APIRouter()
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -28,33 +33,29 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-@router.post("/google-login")
-async def google_login(token_data: dict, db: Session = Depends(get_db)):
-    try:
-        # Verify Google Token
-        idinfo = id_token.verify_oauth2_token(
-            token_data.get("token"), requests.Request(), settings.GOOGLE_CLIENT_ID,
-            clock_skew_in_seconds=10
+@router.post("/login")
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == form_data.username).first()
+    
+    # Auto-register user for the first time
+    if not user:
+        user = models.User(
+            email=form_data.username,
+            name=form_data.username.split('@')[0], 
+            hashed_password=get_password_hash(form_data.password)
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    elif not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
         
-        email = idinfo['email']
-        name = idinfo.get('name', 'User')
-
-        # Find or create user
-        user = db.query(models.User).filter(models.User.email == email).first()
-        if not user:
-            user = models.User(email=email, name=name)
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            
-        access_token = create_access_token(data={"sub": user.email})
-        return {"access_token": access_token, "token_type": "bearer", "user": {"email": email, "name": name}}
-        
-    except ValueError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid Google token: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    access_token = create_access_token(data={"sub": user.email})
+    return {"access_token": access_token, "token_type": "bearer", "user": {"email": user.email, "name": user.name}}
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
