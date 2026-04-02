@@ -6,6 +6,8 @@ import io
 
 import models
 from database import engine, get_db
+import crud
+import forecasting
 
 # Create all tables in the database
 models.Base.metadata.create_all(bind=engine)
@@ -25,10 +27,8 @@ app.add_middleware(
 def read_root():
     return {"message": "Welcome to the AI-powered Inventory Forecasting API"}
 
-import crud
-
 @app.post("/upload-sales")
-async def upload_sales(file: UploadFile = File(...), db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+async def upload_sales(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Invalid file format. Upload a CSV.")
         
@@ -43,19 +43,13 @@ async def upload_sales(file: UploadFile = File(...), db: Session = Depends(get_d
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-import forecasting
-import auth
-from auth import get_current_user
-
-app.include_router(auth.router)
-
 @app.get("/forecast")
-def generate_forecasts(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def generate_forecasts(db: Session = Depends(get_db)):
     count = forecasting.run_forecasts(db)
     return {"message": f"Successfully generated forecasts for {count} products"}
 
 @app.get("/inventory")
-def get_inventory(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def get_inventory(db: Session = Depends(get_db)):
     products = db.query(models.Product).all()
     results = []
     for p in products:
